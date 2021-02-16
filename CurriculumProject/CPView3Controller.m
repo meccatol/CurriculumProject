@@ -26,11 +26,24 @@
 
 #import "CPPopoverEnableDelegateObject.h"
 
+@interface TestObject: NSObject
+@property (atomic, assign) int x1;
+@property (atomic, assign) int x2;
+@end
+
+@implementation TestObject
+@end
+
 @interface CPView3Controller () <UITextViewDelegate>
 @property (strong, nonatomic) IBOutlet UITextView *textView;
 
-@property (atomic) NSInteger total;
-@property (atomic) NSInteger testTotal;
+@property (nonatomic) NSInteger total;
+@property (nonatomic) NSInteger testTotal;
+
+@property (nonatomic, strong) TestObject *thing1;
+@property (nonatomic, strong) TestObject *thing2;
+@property (nonatomic, strong) NSTimer *aTimer;
+@property (nonatomic, strong) NSTimer *secondTimer;
 
 @property (strong) NSLock *lock;
 
@@ -195,6 +208,7 @@
     self.textView.layer.borderWidth = 1.f;
     self.textView.layer.borderColor = [UIColor colorWithWhite:0.05 alpha:1.f].CGColor;
     
+//    [self testNonatomic];
     
 //    NSLog(@"id for vender = %@", [[UIDevice currentDevice] identifierForVendor]);
 #pragma mark - Synchronization
@@ -434,6 +448,95 @@
 
 #pragma mark Creating POSIX Thread
 //    [self posixThread];
+}
+
+- (void)testNonatomic {
+    dispatch_queue_t queue1 = dispatch_queue_create("queue1", DISPATCH_QUEUE_CONCURRENT);
+    dispatch_queue_t queue2 = dispatch_queue_create("queue2", DISPATCH_QUEUE_CONCURRENT);
+    
+    self.thing1 = [[TestObject alloc] init];
+    self.thing2 = [[TestObject alloc] init];
+    
+    dispatch_async(queue1, ^
+                   {
+        for (int x = 0; x < 100; x++)
+        {
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            int thing1Val = arc4random_uniform(10000);
+            int thing2Val = arc4random_uniform(10000);
+            _thing1.x1 = thing1Val;
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            _thing2.x1 = thing2Val;
+            _thing1.x2 = thing1Val; //thing1's x1 and x2 should now match
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            _thing2.x2 = thing2Val; //And now thing2's x1 and x2 should also both match
+        }
+    });
+    
+    
+    //Do the same thing on queue2
+    dispatch_async(queue2, ^
+                   {
+        for (int x = 0; x < 100; x++)
+        {
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            int thing1Val = arc4random_uniform(10000);
+            int thing2Val = arc4random_uniform(10000);
+            _thing1.x1 = thing1Val;
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            _thing2.x1 = thing2Val;
+            _thing1.x2 = thing1Val; //thing1's x1 and x2 should now match
+            usleep(arc4random_uniform(50000)); //sleep for 0 to 50k microseconds
+            _thing2.x2 = thing2Val; //And now thing2's x1 and x2 should also both match
+        }
+    });
+    
+    //Log the values in thing1 and thing2 every .1 second
+    self.aTimer = [NSTimer scheduledTimerWithTimeInterval:.1
+                                                   target:self
+                                                 selector:@selector(logThings:)
+                                                 userInfo:nil
+                                                  repeats:YES];
+    
+    //After 5 seconds, kill the timer.
+    self.secondTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
+                                                        target:self
+                                                      selector:@selector(stopRepeatingTimer:)
+                                                      userInfo:nil
+                                                       repeats:NO];
+}
+
+- (void)stopRepeatingTimer:(NSTimer *)timer {
+    [self.aTimer invalidate];
+}
+
+- (void)logThings:(NSTimer *)timer {
+    NSString *equalString;
+    if (_thing1.x1 == _thing1.x2)
+    {
+        equalString = @"equal";
+    }
+    else
+    {
+        equalString = @"not equal";
+    }
+    NSLog(@"%@ : thing1.x1 = %d, thing1.x2 = %d",
+          equalString,
+          _thing1.x1,
+          _thing1.x2);
+    
+    if (_thing2.x1 == _thing2.x2)
+    {
+        equalString = @"equal";
+    }
+    else
+    {
+        equalString = @"not equal";
+    }
+    NSLog(@"%@ : thing2.x1 = %d, thing2.x2 = %d",
+          equalString,
+          _thing2.x1,
+          _thing2.x2);
 }
 
 //    [NSThread detachNewThreadSelector:@selector(customMethod) toTarget:self withObject:nil];
@@ -686,9 +789,9 @@ static int testMax = 100;
     self.total = self.testTotal = 1000;
     int totalLoop = 5000;
     
-    if (testMax == 100)
-    NSLog(@"**** start total = %zd, %@",
-          self.total, [NSThread currentThread]);
+    if (testMax == 100) {
+        NSLog(@"**** start total = %zd, %@", self.total, [NSThread currentThread]);
+    }
     
     dispatch_queue_t global =
     dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
@@ -732,7 +835,7 @@ static int testMax = 100;
 //    dispatch_barrier_async(global, ^{
 //        dispatch_async(dispatch_get_main_queue(), ^{
 //            NSLog(@"**** End, total = %zd, testTotal = %zd", self.total, self.testTotal);
-//            
+//
 //            if (self.total != self.testTotal) {
 //                NSLog(@"스레드 세이프 하지 않음~~ㅜㅜ");
 //            }else {
@@ -740,12 +843,12 @@ static int testMax = 100;
 //                [self performSelectorOnMainThread:rec
 //                                       withObject:nil
 //                                    waitUntilDone:NO];
-//                
+//
 ////                if (testMax == 0) {
 ////                    NSLog(@"스레드 세이프~~!");
 ////                }else {
 ////                    testMax--;
-////                    
+////
 ////                    SEL rec = @selector(testThreadSafety);
 ////                    [self performSelectorOnMainThread:rec
 ////                                           withObject:nil
@@ -775,10 +878,11 @@ static int testMax = 100;
 //}
 
 - (void)increaseTotal {
-    self.total += 1;
+    self.total = self.total + 1;
 }
+
 - (void)decreaseTotal {
-    self.total -= 1;
+    self.total = self.total - 1;
 }
 
 ////// 아토믹 오퍼레이션.. 스레드 세이프
