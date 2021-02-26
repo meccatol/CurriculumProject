@@ -31,6 +31,11 @@
 @property (atomic, assign) int x2;
 @end
 
+typedef struct {
+    NSUInteger x;
+    NSUInteger xSquared;  // cached value of x*x
+} Data;
+
 @implementation TestObject
 @end
 
@@ -44,6 +49,9 @@
 @property (nonatomic, strong) TestObject *thing2;
 @property (nonatomic, strong) NSTimer *aTimer;
 @property (nonatomic, strong) NSTimer *secondTimer;
+
+@property (atomic) Data latestData;
+@property (atomic) NSObject *latestObject;
 
 @property (strong) NSLock *lock;
 
@@ -208,6 +216,7 @@
     self.textView.layer.borderWidth = 1.f;
     self.textView.layer.borderColor = [UIColor colorWithWhite:0.05 alpha:1.f].CGColor;
     
+    [self startProducing];
 //    [self testNonatomic];
     
 //    NSLog(@"id for vender = %@", [[UIDevice currentDevice] identifierForVendor]);
@@ -449,6 +458,45 @@
 #pragma mark Creating POSIX Thread
 //    [self posixThread];
 }
+
+- (void)startProducing
+{
+    // Produce new Data structs.
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        for (NSUInteger x = 0; x < NSUIntegerMax; x++) {
+            Data newData;
+            newData.x = x;
+            newData.xSquared = x * x;
+
+            // Since the Data struct is too large for a single store,
+            // the setter actually updates the two fields separately.
+            self.latestData = newData;
+        }
+    });
+
+    // Produce new objects.
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        while (true) {
+//             Release the previous value; retain the new value.
+            self.latestObject = [NSObject new];
+        }
+    });
+
+    [NSTimer scheduledTimerWithTimeInterval:0.01 target:self selector:@selector(logStatus) userInfo:nil repeats:YES];
+}
+
+- (void)logStatus
+{
+    // Implicitly retain the current object for our own uses.
+    NSObject *o = self.latestObject;
+    NSLog(@"Latest object: %@", o);
+
+    // Validate the consistency of the data.
+    Data latest = self.latestData;
+    NSAssert(latest.x * latest.x == latest.xSquared, @"WRONG: %lu^2 != %ld", (unsigned long)latest.x, (unsigned long)latest.xSquared);
+    NSLog(@"Latest data: %ld^2 = %ld", (unsigned long)latest.x, (unsigned long)latest.xSquared);
+}
+
 
 - (void)testNonatomic {
     dispatch_queue_t queue1 = dispatch_queue_create("queue1", DISPATCH_QUEUE_CONCURRENT);
